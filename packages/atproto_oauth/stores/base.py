@@ -4,11 +4,20 @@ import typing as t
 from abc import ABC, abstractmethod
 
 if t.TYPE_CHECKING:
-    from atproto_oauth.models import OAuthSession, OAuthState
+    from atproto_oauth.models import OAuthState
 
 
 class StateStore(ABC):
-    """Abstract store for OAuth state during authorization flow."""
+    """Abstract store for OAuth state during authorization flow.
+
+    State is short-lived (typically 10 minutes) and holds PKCE verifier,
+    DPoP key, and other data needed to complete the OAuth callback.
+
+    Note:
+        Session persistence is the caller's responsibility. The OAuthClient
+        returns OAuthSession objects that should be stored by the application
+        and passed to Client.oauth_login() for authenticated requests.
+    """
 
     @abstractmethod
     async def save_state(self, state: 'OAuthState') -> None:
@@ -35,35 +44,4 @@ class StateStore(ABC):
 
         Args:
             state_key: State identifier.
-        """
-
-
-class SessionStore(ABC):
-    """Abstract store for OAuth sessions."""
-
-    @abstractmethod
-    async def save_session(self, session: 'OAuthSession') -> None:
-        """Save OAuth session.
-
-        Args:
-            session: OAuth session object to save.
-        """
-
-    @abstractmethod
-    async def get_session(self, did: str) -> t.Optional['OAuthSession']:
-        """Retrieve OAuth session by DID.
-
-        Args:
-            did: User DID.
-
-        Returns:
-            OAuth session object if found, None otherwise.
-        """
-
-    @abstractmethod
-    async def delete_session(self, did: str) -> None:
-        """Delete OAuth session by DID.
-
-        Args:
-            did: User DID.
         """

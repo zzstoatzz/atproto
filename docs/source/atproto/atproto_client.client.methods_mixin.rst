@@ -13,5 +13,6 @@ Submodules
    :maxdepth: 4
 
    atproto_client.client.methods_mixin.headers
+   atproto_client.client.methods_mixin.oauth
    atproto_client.client.methods_mixin.session
    atproto_client.client.methods_mixin.time

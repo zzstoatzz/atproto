@@ -14,6 +14,7 @@ from atproto_client import models
 from atproto_client.client.async_raw import AsyncClientRaw
 from atproto_client.client.methods_mixin import SessionMethodsMixin, TimeMethodsMixin
 from atproto_client.client.methods_mixin.headers import HeadersConfigurationMethodsMixin
+from atproto_client.client.methods_mixin.oauth import AsyncOAuthSessionMixin
 from atproto_client.client.methods_mixin.session import AsyncSessionDispatchMixin
 from atproto_client.client.session import Session, SessionEvent, SessionResponse
 from atproto_client.exceptions import LoginRequiredError
@@ -26,7 +27,12 @@ if t.TYPE_CHECKING:
 
 
 class AsyncClient(
-    AsyncSessionDispatchMixin, SessionMethodsMixin, TimeMethodsMixin, HeadersConfigurationMethodsMixin, AsyncClientRaw
+    AsyncOAuthSessionMixin,
+    AsyncSessionDispatchMixin,
+    SessionMethodsMixin,
+    TimeMethodsMixin,
+    HeadersConfigurationMethodsMixin,
+    AsyncClientRaw,
 ):
     """High-level client for XRPC of ATProto."""
 

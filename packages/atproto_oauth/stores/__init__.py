@@ -1,11 +1,9 @@
-"""OAuth state and session stores."""
+"""OAuth state stores."""
 
-from atproto_oauth.stores.base import SessionStore, StateStore
-from atproto_oauth.stores.memory import MemorySessionStore, MemoryStateStore
+from atproto_oauth.stores.base import StateStore
+from atproto_oauth.stores.memory import MemoryStateStore
 
 __all__ = [
-    'MemorySessionStore',
     'MemoryStateStore',
-    'SessionStore',
     'StateStore',
 ]

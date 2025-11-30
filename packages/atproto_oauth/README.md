@@ -21,10 +21,10 @@ complete OAuth 2.1 implementation for the ATProto Python SDK, following the [ATP
 ✅ **production-ready**
 - comprehensive error handling
 - SSRF protection and URL validation
-- async-first with sync support
-- pluggable state/session stores
+- async-first design
+- pluggable state store for authorization flow
+- caller-managed session persistence
 - fully typed with type hints
-- 12 unit tests, all passing
 
 ## quick start
 
@@ -32,35 +32,43 @@ complete OAuth 2.1 implementation for the ATProto Python SDK, following the [ATP
 
 ```python
 from atproto_oauth import OAuthClient
-from atproto_oauth.stores import MemorySessionStore, MemoryStateStore
+from atproto_oauth.stores import MemoryStateStore
 
 # create OAuth client
-client = OAuthClient(
+oauth = OAuthClient(
     client_id='http://localhost',  # or your HTTPS URL for production
     redirect_uri='http://127.0.0.1:5000/callback',
     scope='atproto',
     state_store=MemoryStateStore(),
-    session_store=MemorySessionStore(),
 )
 
 # start authorization flow
-auth_url, state = await client.start_authorization('user.bsky.social')
+auth_url, state = await oauth.start_authorization('user.bsky.social')
 
 # user authorizes in browser, then...
 
-# handle callback
-session = await client.handle_callback(
+# handle callback - returns OAuthSession
+session = await oauth.handle_callback(
     code=authorization_code,
     state=state,
     iss=issuer_from_callback,
 )
 
-# make authenticated requests
-response = await client.make_authenticated_request(
-    session=session,
-    method='GET',
-    url=f'{session.pds_url}/xrpc/com.atproto.repo.describeRepo?repo={session.did}',
+# persist session however you want (database, encrypted cookie, etc.)
+# await save_to_database(session)
+
+# use with atproto_client for authenticated requests
+from atproto_client import AsyncClient
+
+atproto = AsyncClient(
+    oauth_client_id='http://localhost',
+    oauth_redirect_uri='http://127.0.0.1:5000/callback',
+    oauth_scope='atproto',
 )
+atproto.oauth_login(session)
+
+# all client methods now work with OAuth
+profile = await atproto.get_profile(session.did)
 ```
 
 ### flask example
@@ -77,56 +85,56 @@ uv add atproto  # includes atproto_oauth
 
 ### OAuthClient
 
-main client for OAuth operations:
+handles the OAuth authorization flow:
 
 ```python
-client = OAuthClient(
+oauth = OAuthClient(
     client_id='https://yourapp.com/client-metadata.json',
     redirect_uri='https://yourapp.com/callback',
-    scope='atproto repo:app.bsky.feed.post',
+    scope='atproto',
     state_store=your_state_store,
-    session_store=your_session_store,
     client_secret_key=your_secret_key,  # optional, for confidential clients
 )
 ```
 
 **methods:**
-- `start_authorization(handle_or_did)` - begin OAuth flow
-- `handle_callback(code, state, iss)` - complete OAuth flow
-- `refresh_session(session)` - refresh tokens
-- `revoke_session(session)` - revoke tokens
-- `make_authenticated_request(session, method, url)` - make DPoP-authenticated requests
+- `start_authorization(handle_or_did)` - begin OAuth flow, returns (auth_url, state)
+- `handle_callback(code, state, iss)` - complete OAuth flow, returns OAuthSession
+- `refresh_session(session)` - refresh tokens, returns updated OAuthSession
+- `revoke_session(session)` - revoke tokens with auth server
 
-### stores
+**session persistence is your responsibility.** store the OAuthSession returned from
+`handle_callback()` however you want (database, encrypted cookie, etc.), then pass
+it to `Client.oauth_login()` for authenticated requests.
 
-pluggable storage for OAuth state and sessions:
+### state store
+
+state stores hold temporary data during the OAuth authorization flow (PKCE verifier,
+DPoP key, etc.). state is short-lived (10 minutes) and single-use.
 
 ```python
-from atproto_oauth.stores import MemoryStateStore, MemorySessionStore
+from atproto_oauth.stores import MemoryStateStore
 
-# memory stores (development only)
+# memory store (development only)
 state_store = MemoryStateStore(state_ttl_seconds=600)
-session_store = MemorySessionStore()
 ```
 
-**custom stores:**
-
-implement `StateStore` and `SessionStore` interfaces:
+**custom state store:**
 
 ```python
-from atproto_oauth.stores.base import StateStore, SessionStore
+from atproto_oauth.stores.base import StateStore
 
-class MyDatabaseStateStore(StateStore):
+class RedisStateStore(StateStore):
     async def save_state(self, state: OAuthState) -> None:
-        # save to database
+        # save to redis with TTL
         pass
 
     async def get_state(self, state_key: str) -> Optional[OAuthState]:
-        # retrieve from database
+        # retrieve from redis
         pass
 
     async def delete_state(self, state_key: str) -> None:
-        # delete from database
+        # delete from redis
         pass
 ```
 
@@ -218,29 +226,46 @@ metadata = await fetch_authserver_metadata_async('https://bsky.social')
 
 ## production deployment
 
-### 1. use persistent stores
+### 1. use persistent state store
 
 ```python
-from your_app.stores import RedisStateStore, PostgreSQLSessionStore
+from your_app.stores import RedisStateStore
 
-client = OAuthClient(
-    state_store=RedisStateStore(),
-    session_store=PostgreSQLSessionStore(),
+oauth = OAuthClient(
+    state_store=RedisStateStore(),  # for multi-instance deployments
     ...
 )
 ```
 
-### 2. deploy with HTTPS
+### 2. persist sessions yourself
 
 ```python
-client = OAuthClient(
+# after OAuth callback
+session = await oauth.handle_callback(code, state, iss)
+
+# serialize and encrypt for storage
+session_data = serialize_oauth_session(session)
+encrypted = encrypt(session_data)
+await db.save_user_session(user_id, encrypted)
+
+# later, restore and use
+encrypted = await db.get_user_session(user_id)
+session_data = decrypt(encrypted)
+session = deserialize_oauth_session(session_data)
+client.oauth_login(session)
+```
+
+### 3. deploy with HTTPS
+
+```python
+oauth = OAuthClient(
     client_id='https://yourapp.com/oauth-client-metadata.json',
     redirect_uri='https://yourapp.com/callback',
     ...
 )
 ```
 
-### 3. create client metadata
+### 4. create client metadata
 
 serve at `https://yourapp.com/oauth-client-metadata.json`:
 

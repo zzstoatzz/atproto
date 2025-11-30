@@ -17,7 +17,7 @@ from atproto_oauth.metadata import (
 from atproto_oauth.models import AuthServerMetadata, OAuthSession, OAuthState, TokenResponse
 from atproto_oauth.pkce import PKCEManager
 from atproto_oauth.security import is_safe_url
-from atproto_oauth.stores.base import SessionStore, StateStore
+from atproto_oauth.stores.base import StateStore
 
 if t.TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
@@ -32,9 +32,13 @@ class OAuthClient:
         client_id: OAuth client ID (must be HTTPS URL or localhost).
         redirect_uri: OAuth redirect URI.
         scope: OAuth scopes (space-separated).
-        state_store: Store for temporary OAuth state.
-        session_store: Store for OAuth sessions.
+        state_store: Store for temporary OAuth state during authorization.
         client_secret_key: Optional EC private key for confidential clients.
+
+    Note:
+        Session persistence is the caller's responsibility. Use the returned
+        OAuthSession from handle_callback() and refresh_session(), then pass
+        it to Client.oauth_login() for authenticated requests.
     """
 
     def __init__(
@@ -43,14 +47,12 @@ class OAuthClient:
         redirect_uri: str,
         scope: str,
         state_store: StateStore,
-        session_store: SessionStore,
         client_secret_key: t.Optional['EllipticCurvePrivateKey'] = None,
     ) -> None:
         self.client_id = client_id
         self.redirect_uri = redirect_uri
         self.scope = scope
         self.state_store = state_store
-        self.session_store = session_store
         self.client_secret_key = client_secret_key
 
         self._id_resolver = AsyncIdResolver()
@@ -189,8 +191,8 @@ class OAuthClient:
         if token_response.scope != self.scope:
             raise OAuthTokenError(f'Scope mismatch: expected {self.scope}, got {token_response.scope}')
 
-        # 4. Create and store session
-        session = OAuthSession(
+        # 4. Create session
+        return OAuthSession(
             did=oauth_state.did or token_response.sub,
             handle=oauth_state.handle or '',
             pds_url=oauth_state.pds_url or '',
@@ -201,10 +203,6 @@ class OAuthClient:
             dpop_authserver_nonce=dpop_nonce,
             scope=token_response.scope,
         )
-
-        await self.session_store.save_session(session)
-
-        return session
 
     async def refresh_session(self, session: OAuthSession) -> OAuthSession:
         """Refresh OAuth session tokens.
@@ -253,21 +251,22 @@ class OAuthClient:
         session.refresh_token = token_response.refresh_token
         session.dpop_authserver_nonce = dpop_nonce
 
-        await self.session_store.save_session(session)
-
         return session
 
     async def revoke_session(self, session: OAuthSession) -> None:
-        """Revoke OAuth session tokens.
+        """Revoke OAuth session tokens with the authorization server.
 
         Args:
             session: OAuth session to revoke.
+
+        Note:
+            This only revokes tokens with the auth server. The caller is
+            responsible for clearing their own session storage.
         """
         authserver_meta = await fetch_authserver_metadata_async(session.authserver_iss)
 
         if not authserver_meta.revocation_endpoint:
-            # Revocation not supported, just delete local session
-            await self.session_store.delete_session(session.did)
+            # Revocation not supported by this auth server
             return
 
         # Revoke both access and refresh tokens
@@ -291,62 +290,6 @@ class OAuthClient:
             except (OAuthTokenError, ValueError):
                 # Best-effort revocation; failures are intentionally silent
                 pass
-
-        # Delete local session
-        await self.session_store.delete_session(session.did)
-
-    async def make_authenticated_request(
-        self,
-        session: OAuthSession,
-        method: str,
-        url: str,
-        **kwargs: t.Any,
-    ) -> httpx.Response:
-        """Make authenticated request to PDS with DPoP.
-
-        Args:
-            session: OAuth session.
-            method: HTTP method.
-            url: Request URL.
-            **kwargs: Additional request arguments.
-
-        Returns:
-            HTTP response.
-        """
-        if not is_safe_url(url):
-            raise ValueError(f'Unsafe URL: {url}')
-
-        # Try request with retry for DPoP nonce
-        for attempt in range(2):
-            # Create DPoP proof
-            dpop_proof = self._dpop.create_proof(
-                method=method.upper(),
-                url=url,
-                private_key=session.dpop_private_key,
-                nonce=session.dpop_pds_nonce,
-                access_token=session.access_token,
-            )
-
-            # Add auth headers
-            headers = kwargs.pop('headers', {})
-            headers['Authorization'] = f'DPoP {session.access_token}'
-            headers['DPoP'] = dpop_proof
-
-            # Make request
-            async with httpx.AsyncClient() as client:
-                response = await client.request(method, url, headers=headers, **kwargs)
-
-            # Check for DPoP nonce error
-            if self._dpop.is_dpop_nonce_error(response):
-                new_nonce = self._dpop.extract_nonce_from_response(response)
-                if new_nonce and attempt == 0:
-                    session.dpop_pds_nonce = new_nonce
-                    await self.session_store.save_session(session)
-                    continue  # Retry with new nonce
-
-            return response
-
-        return response
 
     async def _send_par_request(
         self,

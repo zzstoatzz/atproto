@@ -163,7 +163,7 @@ ignore = [
     "SIM102", # nested if (separate conditions are more readable)
     "C901", # function complexity (security code needs thoroughness)
 ]
-"tests/*.py" = ["D", "S105"]  # docstrings, hardcoded password (test tokens)
+"tests/*.py" = ["D", "S105", "S106"]  # docstrings, hardcoded passwords (test tokens)
 "docs/*.py" = ["T201", "INP001", "ERA001", "E501", "D"]
 "examples/*.py" = ["T201", "INP001", "ERA001", "D"]
 "packages/atproto/exceptions.py" = ["F403"]

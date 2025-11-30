@@ -30,6 +30,7 @@ def gen_client(input_filename: str, output_filename: str) -> None:
     code = code.replace('class Client', 'class AsyncClient')
     code = code.replace('ClientRaw', 'AsyncClientRaw')
     code = code.replace('SessionDispatchMixin', 'AsyncSessionDispatchMixin')
+    code = code.replace('OAuthSessionMixin', 'AsyncOAuthSessionMixin')
 
     code = code.replace('with self', 'async with self')
 
