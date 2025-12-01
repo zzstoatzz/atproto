@@ -14,6 +14,10 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 if t.TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
+    from atproto_client.request import Response as SDKResponse
+
+# Union type for both httpx.Response and SDK Response
+ResponseType = t.Union[httpx.Response, 'SDKResponse']
 
 
 class DPoPManager:
@@ -158,10 +162,62 @@ class DPoPManager:
         return cls._sign_jwt(header, payload, private_key)
 
     @staticmethod
-    def extract_nonce_from_response(response: httpx.Response) -> t.Optional[str]:
+    def _get_header(response: ResponseType, header_name: str) -> t.Optional[str]:
+        """Get header value from response, handling both httpx and SDK response types.
+
+        SDK Response has lowercase keys, httpx.Headers is case-insensitive.
+
+        Args:
+            response: HTTP response object (httpx.Response or SDK Response).
+            header_name: Header name to look up.
+
+        Returns:
+            Header value if present, None otherwise.
+        """
+        headers = response.headers
+        # Try original case first (works for httpx.Headers which is case-insensitive)
+        if value := headers.get(header_name):
+            return value
+        # Try lowercase (SDK Response normalizes to lowercase)
+        if value := headers.get(header_name.lower()):
+            return value
+        return None
+
+    @staticmethod
+    def _get_error_body(response: ResponseType) -> t.Optional[t.Dict[str, t.Any]]:
+        """Get JSON error body from response, handling both httpx and SDK response types.
+
+        httpx.Response has .json() method, SDK Response has .content dict.
+
+        Args:
+            response: HTTP response object.
+
+        Returns:
+            Parsed JSON body as dict if available, None otherwise.
+        """
+        # Check if this is SDK Response (has .content that may already be parsed)
+        if hasattr(response, 'content') and isinstance(response.content, dict):
+            return response.content
+
+        # Check for XrpcError (SDK's parsed error type)
+        if hasattr(response, 'content') and hasattr(response.content, 'error'):
+            return {'error': response.content.error, 'message': getattr(response.content, 'message', None)}
+
+        # httpx.Response - call .json()
+        if hasattr(response, 'json'):
+            try:
+                return response.json()
+            except Exception:
+                pass
+
+        return None
+
+    @classmethod
+    def extract_nonce_from_response(cls, response: ResponseType) -> t.Optional[str]:
         """Extract DPoP nonce from HTTP response.
 
         Checks both the 'DPoP-Nonce' header and error responses.
+        Handles both httpx.Response and SDK Response types.
 
         Args:
             response: HTTP response object.
@@ -169,24 +225,23 @@ class DPoPManager:
         Returns:
             DPoP nonce string if present, None otherwise.
         """
-        # Check DPoP-Nonce header
-        if nonce := response.headers.get('DPoP-Nonce'):
+        # Check DPoP-Nonce header (handles both cases)
+        if nonce := cls._get_header(response, 'DPoP-Nonce'):
             return nonce
 
         # Check for error response with use_dpop_nonce
         if response.status_code in (400, 401):
-            try:
-                error_body = response.json()
-                if isinstance(error_body, dict) and error_body.get('error') == 'use_dpop_nonce':
-                    return response.headers.get('DPoP-Nonce')
-            except Exception:
-                pass
+            error_body = cls._get_error_body(response)
+            if isinstance(error_body, dict) and error_body.get('error') == 'use_dpop_nonce':
+                return cls._get_header(response, 'DPoP-Nonce')
 
         return None
 
-    @staticmethod
-    def is_dpop_nonce_error(response: httpx.Response) -> bool:
+    @classmethod
+    def is_dpop_nonce_error(cls, response: ResponseType) -> bool:
         """Check if response indicates DPoP nonce error.
+
+        Handles both httpx.Response and SDK Response types.
 
         Args:
             response: HTTP response object.
@@ -198,16 +253,13 @@ class DPoPManager:
             return False
 
         # Check WWW-Authenticate header
-        if www_auth := response.headers.get('WWW-Authenticate', ''):
+        if www_auth := cls._get_header(response, 'WWW-Authenticate'):
             if 'use_dpop_nonce' in www_auth.lower():
                 return True
 
         # Check JSON error response
-        try:
-            error_body = response.json()
-            if isinstance(error_body, dict) and error_body.get('error') == 'use_dpop_nonce':
-                return True
-        except Exception:
-            pass
+        error_body = cls._get_error_body(response)
+        if isinstance(error_body, dict) and error_body.get('error') == 'use_dpop_nonce':
+            return True
 
         return False
