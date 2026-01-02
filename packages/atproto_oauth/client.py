@@ -23,6 +23,78 @@ if t.TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 
 
+def _scopes_are_equivalent(requested: str, granted: str) -> bool:
+    """Check if granted scopes satisfy requested scopes.
+
+    Handles permission set expansion where PDS expands `include:namespace.permissionSet`
+    into `repo?collection=...` format.
+
+    Args:
+        requested: The scope string originally requested (may contain `include:` scopes).
+        granted: The scope string returned by the PDS (with expanded permissions).
+
+    Returns:
+        True if granted scopes satisfy all requested permissions.
+    """
+    # fast path: exact match
+    if requested == granted:
+        return True
+
+    requested_parts = set(requested.split())
+    granted_parts = set(granted.split())
+
+    # remove 'atproto' prefix from both
+    requested_parts.discard('atproto')
+    granted_parts.discard('atproto')
+
+    # separate include: scopes from repo: scopes in requested
+    requested_includes = {p for p in requested_parts if p.startswith('include:')}
+    requested_repos = {p for p in requested_parts if p.startswith('repo:')}
+
+    # separate repo?collection= scopes from repo: scopes in granted
+    granted_expanded = set()  # repo?collection= format
+    granted_repos = set()  # repo: format
+    for p in granted_parts:
+        if p.startswith('repo?'):
+            granted_expanded.add(p)
+        elif p.startswith('repo:'):
+            granted_repos.add(p)
+
+    # check that all requested repo: scopes are granted
+    if not requested_repos.issubset(granted_repos):
+        return False
+
+    # if there are no include: scopes, we're done
+    if not requested_includes:
+        return True
+
+    # for include: scopes, verify that we got expanded permissions back
+    # the PDS expands `include:namespace.permSet` into `repo?collection=ns.col1&collection=ns.col2`
+    # we just need to verify we got *some* expanded permissions for each namespace
+    for include_scope in requested_includes:
+        # extract namespace from include:namespace.permissionSet
+        # e.g., include:fm.plyr.authFullApp -> fm.plyr
+        nsid = include_scope.removeprefix('include:')
+        parts = nsid.split('.')
+        if len(parts) < 3:
+            # malformed include scope
+            return False
+        # namespace is everything except the last part (the permission set name)
+        namespace = '.'.join(parts[:-1])
+
+        # check if any expanded scope references this namespace
+        found = False
+        for expanded in granted_expanded:
+            # repo?collection=fm.plyr.track&collection=fm.plyr.like
+            if f'collection={namespace}.' in expanded:
+                found = True
+                break
+        if not found:
+            return False
+
+    return True
+
+
 class OAuthClient:
     """ATProto OAuth 2.1 client.
 
@@ -189,7 +261,7 @@ class OAuthClient:
         if token_response.sub != oauth_state.did:
             raise OAuthTokenError(f'DID mismatch in token: expected {oauth_state.did}, got {token_response.sub}')
 
-        if token_response.scope != self.scope:
+        if not _scopes_are_equivalent(self.scope, token_response.scope):
             raise OAuthTokenError(f'Scope mismatch: expected {self.scope}, got {token_response.scope}')
 
         # 4. Create and store session
