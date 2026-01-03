@@ -22,6 +22,13 @@ from atproto_oauth.stores.base import SessionStore, StateStore
 if t.TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
 
+#: Valid values for the OAuth prompt parameter.
+#: - 'login': Force re-authentication, ignoring any remembered session.
+#: - 'select_account': Show account selection instead of auto-selecting.
+#: - 'consent': Force consent screen even if previously approved.
+#: - 'none': Silent authentication (fails if user interaction required).
+PromptType = t.Literal['login', 'select_account', 'consent', 'none']
+
 
 def _scopes_are_equivalent(requested: str, granted: str) -> bool:
     """Check if granted scopes satisfy requested scopes.
@@ -135,7 +142,7 @@ class OAuthClient:
     async def start_authorization(
         self,
         handle_or_did: str,
-        prompt: t.Optional[t.Literal['login', 'select_account', 'consent', 'none']] = None,
+        prompt: t.Optional[PromptType] = None,
     ) -> t.Tuple[str, str]:
         """Start OAuth authorization flow.
 
