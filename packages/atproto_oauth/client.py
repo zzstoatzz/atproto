@@ -135,11 +135,17 @@ class OAuthClient:
     async def start_authorization(
         self,
         handle_or_did: str,
+        prompt: t.Optional[t.Literal['login', 'select_account', 'consent', 'none']] = None,
     ) -> t.Tuple[str, str]:
         """Start OAuth authorization flow.
 
         Args:
             handle_or_did: User handle (e.g., 'user.bsky.social') or DID.
+            prompt: Optional OAuth prompt parameter to control authorization behavior:
+                - 'login': Force re-authentication, ignoring any remembered session.
+                - 'select_account': Show account selection instead of auto-selecting.
+                - 'consent': Force consent screen even if previously approved.
+                - 'none': Silent authentication (fails if user interaction required).
 
         Returns:
             Tuple of (authorization_url, state) for redirecting user.
@@ -191,6 +197,7 @@ class OAuthClient:
             pkce_challenge=pkce_challenge,
             dpop_key=dpop_key,
             state=state_token,
+            prompt=prompt,
         )
 
         # 9. Store state
@@ -432,8 +439,17 @@ class OAuthClient:
         pkce_challenge: str,
         dpop_key: 'EllipticCurvePrivateKey',
         state: str,
+        prompt: t.Optional[str] = None,
     ) -> t.Tuple[str, str]:
         """Send Pushed Authorization Request.
+
+        Args:
+            authserver_meta: Authorization server metadata.
+            login_hint: User handle or DID hint.
+            pkce_challenge: PKCE challenge string.
+            dpop_key: DPoP private key.
+            state: State token for CSRF protection.
+            prompt: Optional prompt parameter for authorization behavior.
 
         Returns:
             Tuple of (request_uri, dpop_nonce).
@@ -449,6 +465,9 @@ class OAuthClient:
             'scope': self.scope,
             'login_hint': login_hint,
         }
+
+        if prompt:
+            params['prompt'] = prompt
 
         # Make PAR request with DPoP
         dpop_nonce, response = await self._make_token_request(
