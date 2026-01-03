@@ -1,6 +1,6 @@
 """ATProto OAuth 2.1 implementation."""
 
-from atproto_oauth.client import OAuthClient
+from atproto_oauth.client import OAuthClient, PromptType
 from atproto_oauth.exceptions import (
     OAuthError,
     OAuthStateError,
@@ -16,5 +16,6 @@ __all__ = [
     'OAuthState',
     'OAuthStateError',
     'OAuthTokenError',
+    'PromptType',
     'UnsupportedAuthServerError',
 ]
