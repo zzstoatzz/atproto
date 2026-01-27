@@ -271,8 +271,8 @@ class OAuthClient:
             oauth_state=oauth_state,
         )
 
-        # 3. Verify token response
-        if token_response.sub != oauth_state.did:
+        # 3. Verify token response (skip DID check for account creation where did is unknown)
+        if oauth_state.did is not None and token_response.sub != oauth_state.did:
             raise OAuthTokenError(f'DID mismatch in token: expected {oauth_state.did}, got {token_response.sub}')
 
         if not _scopes_are_equivalent(self.scope, token_response.scope):
