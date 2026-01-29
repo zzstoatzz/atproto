@@ -407,6 +407,9 @@ class OAuthClient:
         if not is_safe_url(url):
             raise ValueError(f'Unsafe URL: {url}')
 
+        # Extract user headers once before the loop (preserve for DPoP nonce retry)
+        user_headers = kwargs.pop('headers', {})
+
         # Try request with retry for DPoP nonce
         for attempt in range(2):
             # Create DPoP proof
@@ -418,8 +421,8 @@ class OAuthClient:
                 access_token=session.access_token,
             )
 
-            # Add auth headers
-            headers = kwargs.pop('headers', {})
+            # Add auth headers to a copy of user headers
+            headers = user_headers.copy()
             headers['Authorization'] = f'DPoP {session.access_token}'
             headers['DPoP'] = dpop_proof
 
