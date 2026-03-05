@@ -173,7 +173,7 @@ ignore = [
     "SIM103", "SIM108", "SIM110", "SIM118", # ported from TS reference; keep structure close
     "C401", # set() with generator matches TS style
 ]
-"tests/*.py" = ["D", "S105"]
+"tests/*.py" = ["D", "S105", "S106"]
 "docs/*.py" = ["T201", "INP001", "ERA001", "E501", "D"]
 "examples/*.py" = ["T201", "INP001", "ERA001", "D"]
 "packages/atproto/exceptions.py" = ["F403"]
