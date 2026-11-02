@@ -23,6 +23,19 @@ def test_sdk_record_round_trips() -> None:
     assert dumped['debug'] == SDK_POST
 
 
+def test_sdk_record_dump_honors_exclude_unset() -> None:
+    """A record in an `unknown` field must not gain the fields its source never set."""
+    dumped = _with_unknown(SDK_POST).model_dump(mode='json', by_alias=True, exclude_unset=True)
+
+    assert dumped['debug'] == SDK_POST
+
+
+def test_sdk_record_dump_honors_exclude_defaults() -> None:
+    dumped = _with_unknown(SDK_POST).model_dump(mode='json', by_alias=True, exclude_defaults=True)
+
+    assert 'embed' not in dumped['debug']
+
+
 def test_unregistered_type_falls_back_to_dot_dict() -> None:
     model = _with_unknown({'$type': 'zz.nobody.owns.this', 'a': 1})
 

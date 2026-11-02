@@ -63,6 +63,8 @@ def _serialize_unknown(value: t.Any, serializer: t.Any, info: t.Any) -> t.Any:
         return value.model_dump(
             mode=info.mode,
             by_alias=bool(info.by_alias),
+            exclude_unset=bool(info.exclude_unset),
+            exclude_defaults=bool(info.exclude_defaults),
             exclude_none=bool(info.exclude_none),
         )
 
